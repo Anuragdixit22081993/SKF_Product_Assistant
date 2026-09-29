@@ -1,528 +1,59 @@
 # SKF Product Assistant (Mini)
 
-A lightweight AI-powered SKF product assistant built with **C#/.NET 8, Azure Functions, Microsoft Semantic Kernel, Azure OpenAI, local JSON datasheets, and Redis**.
+A .NET 8 Azure Functions application that provides SKF product information using **Microsoft Semantic Kernel, Azure OpenAI, function calling, conversation state, and Redis-based feedback persistence**.
 
-The application exposes a single HTTP endpoint that supports:
+The solution contains two AI agents and a lightweight orchestrator:
 
-* SKF product Q&A
-* Product attribute lookup
-* Conversation-aware follow-up questions
-* Feedback detection and persistence
-* Semantic Kernel function calling
-* Remote Redis feedback storage
+* **Q&A Agent** — answers SKF product questions using local JSON datasheets.
+* **Feedback Agent** — detects and stores user feedback or corrections.
+* **Orchestrator** — classifies the incoming message and routes it to the appropriate agent.
 
 ---
 
 ## 1. Technology Stack
 
-| Technology                | Purpose                                |
-| ------------------------- | -------------------------------------- |
-| C# / .NET 8               | Application development                |
-| Azure Functions v4        | HTTP API hosting                       |
-| Microsoft Semantic Kernel | AI orchestration and function calling  |
-| Azure OpenAI              | LLM-based reasoning and classification |
-| System.Text.Json          | JSON parsing                           |
-| Redis                     | Feedback persistence                   |
-| StackExchange.Redis       | Redis client                           |
-| Local JSON                | SKF product datasheets                 |
+* C#
+* .NET 8
+* Azure Functions v4 – Isolated Worker
+* Microsoft Semantic Kernel
+* Azure OpenAI
+* Redis
+* JSON product datasheets
+* REST/HTTP API
+* Git/GitHub
 
 ---
 
-## 2. Project Architecture
-
-The application uses a lightweight multi-agent architecture.
+## 2. Architecture
 
 ```text
-                    HTTP Request
+                     HTTP POST
                          |
                          v
               ProductAssistantFunction
                          |
                          v
-             ProductAssistantOrchestrator
-                    /            \
-                   /              \
-                  v                v
-             QaAgent          FeedbackAgent
-                |                  |
-                v                  v
-       ProductDataPlugin     FeedbackPlugin
-                |                  |
-                v                  v
-       ProductDataService     FeedbackStore
-                |                  |
-                v                  v
-          Local JSON          Remote Redis
-          Datasheets
+          ProductAssistantOrchestrator
+                    /          \
+                   /            \
+                  v              v
+             Q&A Agent      Feedback Agent
+                  |              |
+                  v              v
+       ProductDataPlugin   FeedbackPlugin
+                  |              |
+                  v              v
+       ProductDataService    FeedbackStore
+                  |              |
+                  v              v
+          Local JSON Files       Redis
 ```
 
-### Main components
-
-#### ProductAssistantFunction
-
-The Azure Function exposes the HTTP API endpoint:
-
-```text
-POST /api/ProductAssistant
-```
-
-It validates the incoming request and forwards it to the orchestrator.
-
-#### ProductAssistantOrchestrator
-
-The orchestrator determines whether the incoming message is:
-
-* A product question
-* User feedback
-
-The message is then routed to the appropriate agent.
-
-#### QaAgent
-
-The Q&A Agent:
-
-1. Understands the user's product question.
-2. Identifies the product designation.
-3. Identifies the requested attribute.
-4. Uses the Semantic Kernel product function.
-5. Retrieves information from the local SKF datasheets.
-6. Returns a concise grounded answer.
-7. Maintains relevant conversation context.
-
-#### FeedbackAgent
-
-The Feedback Agent:
-
-1. Analyzes the user's feedback.
-2. Identifies the feedback type.
-3. Uses previous conversation context.
-4. Identifies the related product and attribute.
-5. Calls the `save_feedback` Semantic Kernel function.
-6. Persists the feedback in Redis.
-7. Returns a confirmation response.
-
-#### ProductDataService
-
-Reads the local SKF JSON datasheets and retrieves requested attributes.
-
-Supported product datasheets:
-
-```text
-Data/6205.json
-Data/6205 N.json
-```
-
-The service returns `null` when the requested product or attribute is unavailable.
-
-#### ConversationStateService
-
-Maintains lightweight conversation state in memory.
-
-The state includes:
-
-* Conversation ID
-* Last product designation
-* Last attribute
-* Last answer
-
-This allows follow-up questions such as:
-
-```text
-User:
-What is the width of SKF 6205?
-
-Assistant:
-The width of SKF 6205 is 15 mm.
-
-User:
-What about the bore diameter?
-
-Assistant:
-The bore diameter is 25 mm.
-```
-
-#### FeedbackStore
-
-Stores feedback records in the configured Redis instance.
-
-Redis keys use the following pattern:
-
-```text
-feedback:{conversationId}:{uniqueId}
-```
-
-Example:
-
-```text
-feedback:redis-test-003:b8c25f8c718541afa10d14579ca81a3a
-```
+The application uses Semantic Kernel to provide AI orchestration and function calling while keeping product data grounded in the supplied SKF datasheets.
 
 ---
 
-## 3. Semantic Kernel Function Calling
-
-The application uses Microsoft Semantic Kernel to expose application capabilities as functions.
-
-### Product function
-
-```text
-get_product_attribute
-```
-
-Purpose:
-
-```text
-Retrieve an SKF product attribute from the local datasheet.
-```
-
-### Feedback function
-
-```text
-save_feedback
-```
-
-Purpose:
-
-```text
-Persist user feedback in Redis.
-```
-
-The agents allow the Azure OpenAI model to select the appropriate Semantic Kernel function through function calling.
-
----
-
-## 4. Product Datasheets
-
-Product information is stored locally under:
-
-```text
-Data/
-├── 6205.json
-└── 6205 N.json
-```
-
-The application does not use the LLM as the source of product facts.
-
-Instead, the LLM identifies the requested information and the Semantic Kernel function retrieves the actual value from the SKF datasheet.
-
-This helps keep product answers grounded in the supplied data.
-
----
-
-## 5. Configuration
-
-Sensitive configuration is stored outside the source code.
-
-For local Azure Functions development, configuration is stored in:
-
-```text
-local.settings.json
-```
-
-Required configuration includes:
-
-```text
-AZURE_OPENAI_ENDPOINT
-AZURE_OPENAI_API_KEY
-AZURE_OPENAI_DEPLOYMENT
-REDIS_CONNECTION_STRING
-```
-
-Example structure:
-
-```json
-{
-  "IsEncrypted": false,
-  "Values": {
-    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
-    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
-    "AZURE_OPENAI_ENDPOINT": "<Azure OpenAI endpoint>",
-    "AZURE_OPENAI_API_KEY": "<Azure OpenAI API key>",
-    "AZURE_OPENAI_DEPLOYMENT": "<Azure OpenAI deployment>",
-    "REDIS_CONNECTION_STRING": "<Redis connection string>"
-  }
-}
-```
-
-Actual credentials must not be committed to source control.
-
----
-
-## 6. Running Locally
-
-### Prerequisites
-
-Install:
-
-* .NET 8 SDK
-* Azure Functions Core Tools
-* Redis access
-* Access to the configured Azure OpenAI deployment
-
-Verify .NET:
-
-```bash
-dotnet --version
-```
-
-Verify Azure Functions Core Tools:
-
-```bash
-func --version
-```
-
-### Build
-
-From the project directory:
-
-```bash
-dotnet build
-```
-
-### Start Azure Functions
-
-On the development machine, the application can be started using:
-
-```bash
-DOTNET_ROOT=/opt/homebrew/opt/dotnet@8/libexec PATH=/opt/homebrew/opt/dotnet@8/bin:$PATH func start
-```
-
-The HTTP endpoint will be available at:
-
-```text
-http://localhost:7071/api/ProductAssistant
-```
-
----
-
-## 7. API
-
-### Endpoint
-
-```text
-POST /api/ProductAssistant
-```
-
-### Header
-
-```text
-Content-Type: application/json
-```
-
-### Request format
-
-```json
-{
-  "message": "What is the width of SKF 6205?",
-  "conversationId": "test-001"
-}
-```
-
----
-
-## 8. Example: Product Question
-
-Request:
-
-```json
-{
-  "message": "What is the width of SKF 6205?",
-  "conversationId": "test-001"
-}
-```
-
-Response:
-
-```json
-{
-  "ConversationId": "test-001",
-  "Message": "The width of SKF 6205 is 15 mm.",
-  "ProductDesignation": "6205",
-  "Attribute": "Width",
-  "FeedbackType": null,
-  "Feedback": null
-}
-```
-
----
-
-## 9. Example: Follow-up Question
-
-First request:
-
-```json
-{
-  "message": "What is the width of SKF 6205?",
-  "conversationId": "test-001"
-}
-```
-
-Follow-up:
-
-```json
-{
-  "message": "What about the bore diameter?",
-  "conversationId": "test-001"
-}
-```
-
-The same conversation ID allows the application to use the previously identified product.
-
-Example response:
-
-```json
-{
-  "ConversationId": "test-001",
-  "Message": "The bore diameter is 25 mm.",
-  "ProductDesignation": "6205",
-  "Attribute": "Bore diameter",
-  "FeedbackType": null,
-  "Feedback": null
-}
-```
-
----
-
-## 10. Example: Missing Attribute
-
-Request:
-
-```json
-{
-  "message": "What is the weight of SKF 6205?",
-  "conversationId": "test-003"
-}
-```
-
-If the attribute is not available in the supplied datasheet, the application does not invent a value.
-
-Example response:
-
-```json
-{
-  "ConversationId": "test-003",
-  "Message": "Weight is not available in the SKF datasheet for product 6205.",
-  "ProductDesignation": "6205",
-  "Attribute": "Weight",
-  "FeedbackType": null,
-  "Feedback": null
-}
-```
-
----
-
-## 11. Example: Feedback
-
-Request:
-
-```json
-{
-  "message": "The answer was helpful.",
-  "conversationId": "redis-test-003"
-}
-```
-
-Example response:
-
-```json
-{
-  "ConversationId": "redis-test-003",
-  "Message": "Feedback saved successfully.",
-  "ProductDesignation": "6205",
-  "Attribute": "Width",
-  "FeedbackType": "helpful",
-  "Feedback": "The answer was helpful."
-}
-```
-
-The feedback is persisted in Redis.
-
-Example Redis key:
-
-```text
-feedback:redis-test-003:<unique-id>
-```
-
----
-
-## 12. Feedback Types
-
-The Feedback Agent recognizes the following categories:
-
-```text
-helpful
-unhelpful
-correction
-general
-```
-
-For example:
-
-```text
-"The answer was helpful."
-```
-
-can be classified as:
-
-```text
-helpful
-```
-
-A correction such as:
-
-```text
-"The width answer is incorrect. The correct width is 16 mm."
-```
-
-can be classified as:
-
-```text
-correction
-```
-
----
-
-## 13. Redis
-
-The application uses `StackExchange.Redis`.
-
-Redis configuration is provided through:
-
-```text
-REDIS_CONNECTION_STRING
-```
-
-The application does not hardcode the Redis credentials.
-
-The feedback flow is:
-
-```text
-FeedbackAgent
-      |
-      v
-FeedbackPlugin
-      |
-      v
-FeedbackStore
-      |
-      v
-StackExchange.Redis
-      |
-      v
-Remote Redis
-```
-
-Redis persistence was verified using the remote Redis instance.
-
-Example key:
-
-```text
-feedback:redis-test-003:b8c25f8c718541afa10d14579ca81a3a
-```
-
----
-
-## 14. Project Structure
+## 3. Project Structure
 
 ```text
 SKF_Product_Assistant/
@@ -557,145 +88,681 @@ SKF_Product_Assistant/
 ├── Program.cs
 ├── SKF_Product_Assistant.csproj
 ├── host.json
-├── local.settings.json
 ├── .gitignore
 └── README.md
 ```
 
 ---
 
-## 15. Design Decisions
+# 4. Prerequisites
 
-### Agent separation
+The project is designed to run on any development environment that supports the required .NET and Azure Functions versions.
 
-Q&A and feedback responsibilities are separated into independent agents so that each agent has a focused responsibility.
+Install:
 
-### Lightweight orchestration
+* .NET 8 SDK
+* Azure Functions Core Tools v4
+* Git
 
-The orchestrator provides a simple routing layer between the HTTP endpoint and the specialized agents.
+The application also requires access to:
 
-### Function calling
+* Azure OpenAI
+* Redis
 
-Application capabilities such as product lookup and feedback persistence are exposed through Semantic Kernel functions instead of allowing the model to directly access application resources.
-
-### Grounded product answers
-
-Product facts are retrieved from the supplied local datasheets rather than generated from general model knowledge.
-
-### Conversation state
-
-Minimal state is maintained to support contextual follow-up questions without passing the complete conversation history to every component.
-
-### Redis persistence
-
-Feedback is stored in Redis so feedback can persist independently of the in-memory application state.
-
-### Dependency injection
-
-Services and agents are registered through .NET dependency injection to improve separation of concerns and maintainability.
+No machine-specific paths are required when .NET 8 is already configured as the active SDK.
 
 ---
 
-## 16. Error Handling
+# 5. Verify Prerequisites
 
-The HTTP function validates required request fields before processing.
+Check the installed .NET version:
 
-Required fields:
-
-```text
-message
-conversationId
+```bash
+dotnet --version
 ```
 
-The application returns a bad-request response when required information is missing.
-
-Product lookup returns no value when the requested product or attribute is unavailable rather than inventing product information.
-
----
-
-## 17. Current Validation
-
-The application has been manually validated with:
-
-* Product attribute lookup
-* Follow-up questions
-* Multiple SKF product designations
-* Missing product attributes
-* Feedback classification
-* Feedback persistence
-* Redis key verification
-* Remote Redis TLS connectivity
-* Azure Function HTTP endpoint
-* Semantic Kernel function calling
-
-Example validated product responses include:
+The project targets:
 
 ```text
-SKF 6205 width → 15 mm
-SKF 6205 bore diameter → 25 mm
-SKF 6205 N outside diameter → 52 mm
+.NET 8
+```
+
+Check Azure Functions Core Tools:
+
+```bash
+func --version
+```
+
+Check Git:
+
+```bash
+git --version
 ```
 
 ---
 
-## 18. Limitations
+# 6. Clone the Repository
 
-This is a lightweight evaluation implementation.
+Clone the repository:
 
-Current limitations include:
+```bash
+git clone https://github.com/Anuragdixit22081993/SKF_Product_Assistant.git
+```
 
-* Conversation state is maintained in application memory.
-* Conversation state is lost when the Function process restarts.
-* Product datasheets are local JSON files.
-* Redis is used for feedback persistence.
-* The application currently supports the supplied SKF product datasheets.
+Navigate to the project:
 
-These choices keep the implementation small while demonstrating the requested agent, function-calling, state, and persistence patterns.
+```bash
+cd SKF_Product_Assistant
+```
 
 ---
 
-## 19. Git / Secret Management
+# 7. Restore and Build
 
-`local.settings.json` contains local configuration and must not be committed.
+Restore dependencies:
 
-The `.gitignore` should include:
+```bash
+dotnet restore
+```
+
+Build the application:
+
+```bash
+dotnet build
+```
+
+The build should complete successfully before starting the Azure Function.
+
+---
+
+# 8. Configuration
+
+The application uses environment-based configuration.
+
+Required settings:
+
+```text
+AZURE_OPENAI_ENDPOINT
+AZURE_OPENAI_API_KEY
+AZURE_OPENAI_DEPLOYMENT
+REDIS_CONNECTION_STRING
+```
+
+For local development, create or update:
 
 ```text
 local.settings.json
-bin/
-obj/
-.vscode/
 ```
 
-Never commit:
+Example structure:
 
-* Azure OpenAI API keys
-* Redis passwords
-* Connection strings containing credentials
-* Other environment-specific secrets
+```json
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+    "AZURE_OPENAI_ENDPOINT": "<your-azure-openai-endpoint>",
+    "AZURE_OPENAI_API_KEY": "<your-azure-openai-key>",
+    "AZURE_OPENAI_DEPLOYMENT": "<your-deployment-name>",
+    "REDIS_CONNECTION_STRING": "<your-redis-connection-string>"
+  }
+}
+```
+
+### Security
+
+Do not commit `local.settings.json` or any credentials to source control.
+
+The repository `.gitignore` excludes local configuration and build output.
+
+For deployed environments, configure these values through the Azure Function App application settings or the organization's approved secret-management solution.
 
 ---
 
-## 20. Summary
+# 9. Run Locally
 
-SKF Product Assistant demonstrates a lightweight agent-based architecture using:
+Start the Azure Function:
 
-```text
-C# / .NET 8
-      +
-Azure Functions
-      +
-Semantic Kernel
-      +
-Azure OpenAI
-      +
-Function Calling
-      +
-Local SKF Datasheets
-      +
-Conversation State
-      +
-Remote Redis
+```bash
+func start
 ```
 
-The implementation provides a single HTTP API for grounded SKF product Q&A and feedback handling while keeping application configuration and credentials outside the source code.
+The HTTP endpoint will normally be available at:
+
+```text
+http://localhost:7071/api/ProductAssistant
+```
+
+The endpoint accepts HTTP POST requests.
+
+### macOS / Multiple .NET Versions
+
+If a development machine has multiple .NET versions installed, the machine may need to explicitly select .NET 8.
+
+For example, the original development environment used Homebrew .NET 8 with:
+
+```bash
+DOTNET_ROOT=/opt/homebrew/opt/dotnet@8/libexec PATH=/opt/homebrew/opt/dotnet@8/bin:$PATH func start
+```
+
+This command is **environment-specific** and is not required when .NET 8 is already the active SDK.
+
+---
+
+# 10. API Request
+
+### Endpoint
+
+```text
+POST /api/ProductAssistant
+```
+
+### Header
+
+```text
+Content-Type: application/json
+```
+
+### Request Body
+
+```json
+{
+  "message": "What is the width of SKF 6205?",
+  "conversationId": "test-001"
+}
+```
+
+---
+
+# 11. Q&A Example
+
+Request:
+
+```json
+{
+  "message": "What is the width of SKF 6205?",
+  "conversationId": "test-001"
+}
+```
+
+Example response:
+
+```json
+{
+  "ConversationId": "test-001",
+  "Message": "The width of SKF 6205 is 15 mm.",
+  "ProductDesignation": "6205",
+  "Attribute": "Width",
+  "FeedbackType": null,
+  "Feedback": null
+}
+```
+
+The Q&A Agent uses Semantic Kernel function calling to retrieve the requested value from the product datasheet.
+
+---
+
+# 12. Conversation Follow-up
+
+The application maintains lightweight conversation state using the `conversationId`.
+
+For example, after asking:
+
+```text
+What is the width of SKF 6205?
+```
+
+The user can ask:
+
+```text
+What about the bore diameter?
+```
+
+using the same conversation ID:
+
+```json
+{
+  "message": "What about the bore diameter?",
+  "conversationId": "test-001"
+}
+```
+
+The application can use the previously identified product:
+
+```text
+6205
+```
+
+and retrieve the new attribute.
+
+Example response:
+
+```json
+{
+  "ConversationId": "test-001",
+  "Message": "The bore diameter is 25 mm.",
+  "ProductDesignation": "6205",
+  "Attribute": "Bore diameter",
+  "FeedbackType": null,
+  "Feedback": null
+}
+```
+
+---
+
+# 13. Supported Product Datasheets
+
+The current implementation includes the supplied local product datasheets:
+
+```text
+Data/
+├── 6205.json
+└── 6205 N.json
+```
+
+The `ProductDataService` reads these JSON files and searches supported product sections for the requested attribute.
+
+The implementation currently supports:
+
+* Dimensions
+* Properties
+* Performance
+* Logistics
+* Specifications
+
+Only information present in the supplied datasheets is returned.
+
+---
+
+# 14. Grounded Q&A Behavior
+
+The Q&A Agent is instructed to:
+
+1. Identify the product designation.
+2. Identify the requested attribute.
+3. Use previous conversation state when appropriate.
+4. Call the product data function before answering.
+5. Never invent product information.
+6. Return a clear response when an attribute is unavailable.
+7. Keep responses concise.
+8. Avoid exposing internal implementation details.
+
+Example:
+
+```text
+User:
+What is the weight of SKF 6205?
+
+Assistant:
+Weight is not available in the SKF datasheet for product 6205.
+```
+
+This prevents unsupported product information from being generated by the model.
+
+---
+
+# 15. Feedback Agent
+
+The Feedback Agent handles messages such as:
+
+```text
+The answer was helpful.
+```
+
+```text
+The answer is incorrect.
+```
+
+```text
+The width should be 16 mm.
+```
+
+The agent identifies:
+
+* Product
+* Attribute
+* Feedback type
+* Feedback text
+
+It uses the current conversation state to resolve product and attribute information when they are not explicitly repeated in the feedback.
+
+---
+
+# 16. Feedback Persistence
+
+Feedback is persisted using Redis.
+
+The flow is:
+
+```text
+User Feedback
+      |
+      v
+Feedback Agent
+      |
+      v
+Semantic Kernel Function Calling
+      |
+      v
+FeedbackPlugin
+      |
+      v
+FeedbackStore
+      |
+      v
+Redis
+```
+
+Each feedback record contains information such as:
+
+```text
+ConversationId
+ProductDesignation
+Attribute
+FeedbackType
+Feedback
+CreatedAtUtc
+```
+
+The Redis connection is configured using:
+
+```text
+REDIS_CONNECTION_STRING
+```
+
+The application does not hard-code Redis credentials.
+
+---
+
+# 17. Semantic Kernel Function Calling
+
+The application uses Semantic Kernel functions for controlled access to application capabilities.
+
+### Product function
+
+```text
+get_product_attribute
+```
+
+Purpose:
+
+```text
+Retrieve an attribute from the local SKF product datasheet.
+```
+
+### Feedback function
+
+```text
+save_feedback
+```
+
+Purpose:
+
+```text
+Persist user feedback to Redis.
+```
+
+The agents use Semantic Kernel's function-calling capability rather than directly embedding product data inside prompts.
+
+---
+
+# 18. Orchestration
+
+The `ProductAssistantOrchestrator` acts as the entry point for AI routing.
+
+The incoming message is classified as either:
+
+```text
+QUESTION
+```
+
+or:
+
+```text
+FEEDBACK
+```
+
+Routing:
+
+```text
+QUESTION
+   |
+   v
+Q&A Agent
+```
+
+or:
+
+```text
+FEEDBACK
+   |
+   v
+Feedback Agent
+```
+
+This keeps the responsibilities of the two agents separated.
+
+---
+
+# 19. Error Handling
+
+The HTTP function validates:
+
+* Request body
+* Message
+* Conversation ID
+
+Invalid requests return HTTP `400`.
+
+Unexpected application errors return HTTP `500`.
+
+The application also handles unavailable product attributes by returning a grounded response instead of inventing a value.
+
+---
+
+# 20. Security and Configuration Practices
+
+The implementation follows basic secure configuration practices:
+
+* Secrets are not hard-coded in source code.
+* `local.settings.json` is excluded from Git.
+* Azure OpenAI credentials are read from environment variables.
+* Redis credentials are read from environment variables.
+* User input is validated before processing.
+* Product data access is restricted to the supplied local datasheets.
+* The AI agent is instructed not to fabricate unavailable product information.
+* Build artifacts are excluded from source control.
+
+For production deployment, secrets should be stored using the organization's approved Azure secret-management approach rather than committed to the repository.
+
+---
+
+# 21. Design Decisions
+
+### Semantic Kernel
+
+Semantic Kernel provides:
+
+* AI orchestration
+* Prompt execution
+* Function calling
+* Plugin integration
+
+### Separate Agents
+
+The Q&A and Feedback responsibilities are separated to improve maintainability and allow each agent to have focused instructions.
+
+### Local Product Data
+
+The supplied SKF product information is stored locally in JSON files.
+
+This provides a deterministic data source for product attribute retrieval and reduces the risk of the LLM generating unsupported product information.
+
+### Conversation State
+
+A lightweight in-memory conversation state service is used for the current application instance.
+
+The state tracks:
+
+```text
+ConversationId
+LastProductDesignation
+LastAttribute
+LastAnswer
+```
+
+This enables contextual follow-up questions.
+
+### Redis
+
+Redis is used for feedback persistence.
+
+This separates feedback storage from the AI agent logic and allows the storage implementation to be changed independently.
+
+---
+
+# 22. Current Validation
+
+The following flows have been validated during development:
+
+### Basic Q&A
+
+```text
+What is the width of SKF 6205?
+```
+
+Returns:
+
+```text
+15 mm
+```
+
+### Follow-up Question
+
+```text
+What about the bore diameter?
+```
+
+Returns:
+
+```text
+25 mm
+```
+
+### Second Product
+
+```text
+What is the outside diameter of SKF 6205 N?
+```
+
+Returns:
+
+```text
+52 mm
+```
+
+### Missing Attribute
+
+```text
+What is the weight of SKF 6205?
+```
+
+Returns an unavailable-data response rather than an invented value.
+
+### Helpful Feedback
+
+```text
+The answer was helpful.
+```
+
+### Correction Feedback
+
+```text
+The width answer is incorrect. The correct width is 16 mm.
+```
+
+Feedback is persisted to Redis.
+
+---
+
+# 23. Limitations
+
+The current implementation intentionally keeps the solution lightweight.
+
+* Conversation state is currently stored in memory.
+* Restarting the Function App clears the conversation state.
+* Product lookup currently covers the supplied datasheets.
+* Redis is used for feedback persistence rather than conversation state.
+* No UI is included because the assignment requires an HTTP endpoint.
+* Automated unit tests are not included in this submission.
+
+These choices keep the implementation focused on the assignment requirements while leaving clear extension points for production hardening.
+
+---
+
+# 24. Possible Production Extensions
+
+For a production implementation, the following could be added:
+
+* Persistent conversation state using Redis or another distributed store.
+* Managed identity for Azure service authentication where supported.
+* Azure Key Vault integration for secrets.
+* Structured application logging.
+* Application Insights monitoring.
+* Automated unit and integration tests.
+* Authentication and authorization for the HTTP endpoint.
+* Rate limiting and abuse protection.
+* Additional product datasheets.
+* More robust product/attribute normalization.
+* CI/CD deployment through GitHub Actions or Azure DevOps.
+
+---
+
+# 25. Running the Project — Quick Reference
+
+```bash
+git clone https://github.com/Anuragdixit22081993/SKF_Product_Assistant.git
+
+cd SKF_Product_Assistant
+
+dotnet restore
+
+dotnet build
+
+func start
+```
+
+Then call:
+
+```text
+POST http://localhost:7071/api/ProductAssistant
+```
+
+with:
+
+```json
+{
+  "message": "What is the width of SKF 6205?",
+  "conversationId": "test-001"
+}
+```
+
+---
+
+# 26. Summary
+
+SKF Product Assistant demonstrates a lightweight AI-enabled backend using:
+
+* .NET 8
+* Azure Functions
+* Microsoft Semantic Kernel
+* Azure OpenAI
+* Function calling
+* Two specialized AI agents
+* Conversation state
+* Local SKF product datasheets
+* Redis feedback persistence
+* Environment-based configuration
+
+The solution is designed to be cloned and run in another development environment without relying on the original developer's machine-specific paths or local setup.
